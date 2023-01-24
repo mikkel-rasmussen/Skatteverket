@@ -26,7 +26,7 @@ function Get-SEKUSDPMIAtDate ([datetime]$Date)
          </xsd:getInterestAndExchangeRates>
      </soap:Body>
  </soap:Envelope>', $Date.ToString("yyyy-MM-dd"))
-		$groups = $([xml]$(Invoke-WebRequest -Method Post -Headers @{'Content-Type'='application/soap+xml;charset=utf-8;action=urn:getInterestAndExchangeRates'} -Body $body -Uri 'https://swea.riksbank.se/sweaWS/services/SweaWebServiceHttpSoap12Endpoint' -UseBasicParsing)."Content").Envelope.body.getInterestAndExchangeRatesResponse.return.groups
+		$groups = $([xml]$(Invoke-WebRequest -Method Post -SkipHeaderValidation -Headers @{'Content-Type'='application/soap+xml;charset=utf-8;action=urn:getInterestAndExchangeRates'} -Body $body -Uri 'https://swea.riksbank.se/sweaWS/services/SweaWebServiceHttpSoap12Endpoint' -UseBasicParsing)."Content").Envelope.body.getInterestAndExchangeRatesResponse.return.groups
 		# Scan backwards in time for the latest rate, if the response for the current is empty.
 		if ($null -eq $groups) { Write-Host $([string]::Format("No exchange rate for {0}, trying the previous day", $Date.ToString("yyyy-MM-dd"))) }
 		$Date = $Date.AddDays(-1.0)
