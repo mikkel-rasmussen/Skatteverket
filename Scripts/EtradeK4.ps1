@@ -26,7 +26,15 @@ function Get-SEKUSDPMIAtDate ([datetime]$Date)
          </xsd:getInterestAndExchangeRates>
      </soap:Body>
  </soap:Envelope>', $Date.ToString("yyyy-MM-dd"))
-		$groups = $([xml]$(Invoke-WebRequest -Method Post -SkipHeaderValidation -Headers @{'Content-Type'='application/soap+xml;charset=utf-8;action=urn:getInterestAndExchangeRates'} -Body $body -Uri 'https://swea.riksbank.se/sweaWS/services/SweaWebServiceHttpSoap12Endpoint' -UseBasicParsing)."Content").Envelope.body.getInterestAndExchangeRatesResponse.return.groups
+		$groups = $null
+		if ($host.Version -gt "7.0")
+		{
+			$groups = $([xml]$(Invoke-WebRequest -Method Post -SkipHeaderValidation -Headers @{'Content-Type'='application/soap+xml;charset=utf-8;action=urn:getInterestAndExchangeRates'} -Body $body -Uri 'https://swea.riksbank.se/sweaWS/services/SweaWebServiceHttpSoap12Endpoint' -UseBasicParsing)."Content").Envelope.body.getInterestAndExchangeRatesResponse.return.groups
+		}
+		else
+		{
+			$groups = $([xml]$(Invoke-WebRequest -Method Post -Headers @{'Content-Type'='application/soap+xml;charset=utf-8;action=urn:getInterestAndExchangeRates'} -Body $body -Uri 'https://swea.riksbank.se/sweaWS/services/SweaWebServiceHttpSoap12Endpoint' -UseBasicParsing)."Content").Envelope.body.getInterestAndExchangeRatesResponse.return.groups
+		}
 		# Scan backwards in time for the latest rate, if the response for the current is empty.
 		if ($null -eq $groups) { Write-Host $([string]::Format("No exchange rate for {0}, trying the previous day", $Date.ToString("yyyy-MM-dd"))) }
 		$Date = $Date.AddDays(-1.0)
@@ -68,7 +76,9 @@ foreach ($gl in $gainsLosses)
 		Add-Member -Type NoteProperty -Name 'Försäljningspris' -Value $closingSEK -PassThru |
 		Add-Member -Type NoteProperty -Name 'Omkostnadsbelopp' -Value $openingSEK -PassThru |
 		Add-Member -Type NoteProperty -Name 'Vinst' -Value $gain -PassThru |
-		Add-Member -Type NoteProperty -Name 'Förlust' -Value $loss -PassThru
+		Add-Member -Type NoteProperty -Name 'Förlust' -Value $loss -PassThru |
+		Add-Member -Type NoteProperty -Name 'Öppningskurs' -Value $openingRate -PassThru |
+		Add-Member -Type NoteProperty -Name 'Slutkurs' -Value $closingRate -PassThru
 	$k4 += $k4Row
 }
 
