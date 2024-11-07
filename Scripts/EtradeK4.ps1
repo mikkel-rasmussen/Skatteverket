@@ -1,6 +1,7 @@
 # Helper for acquiring the archival exchange rate for a given date.
 function Get-SEKUSDPMIAtDate([string]$startDate, [string]$endDate)
 {
+	# https://developer.api.riksbank.se/api-details
 	$groups = Invoke-RestMethod -Uri https://api.riksbank.se/swea/v1/CrossRates/SEKUSDPMI/SEKETT/$startDate/$endDate -Method Get
 	return $groups
 }
