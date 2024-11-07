@@ -1,47 +1,43 @@
 # Helper for acquiring the archival exchange rate for a given date.
-function Get-SEKUSDPMIAtDate ([datetime]$Date)
+function Get-SEKUSDPMIAtDate([string]$startDate, [string]$endDate)
 {
-	$groups = $null
-	do
+	$groups = Invoke-RestMethod -Uri https://api.riksbank.se/swea/v1/CrossRates/SEKUSDPMI/SEKETT/$startDate/$endDate -Method Get
+	return $groups
+}
+
+function Get-ExchangeRateOnDate([datetime]$date, $exchangeRates)
+{
+	$retryCount = 5
+	$rateOnDate = $null
+	$altRateOnDate = $null
+	[datetime]$altDate = $date
+	do 
 	{
-		$body = [string]::Format('<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:xsd="http://swea.riksbank.se/xsd">
-     <soap:Header/>
-     <soap:Body>
-         <xsd:getInterestAndExchangeRates>
-             <searchRequestParameters>
-                 <aggregateMethod>D</aggregateMethod>
-                 <datefrom>{0}</datefrom>
-                 <dateto>{0}</dateto>
-                 <languageid>en</languageid>
-                 <min>false</min>
-                 <avg>true</avg>
-                 <max>true</max>
-                 <ultimo>false</ultimo>
-                 <!--1 or more repetitions:-->
-                 <searchGroupSeries>
-                     <groupid>11</groupid>
-                     <seriesid>SEKUSDPMI</seriesid>
-                 </searchGroupSeries>
-             </searchRequestParameters>
-         </xsd:getInterestAndExchangeRates>
-     </soap:Body>
- </soap:Envelope>', $Date.ToString("yyyy-MM-dd"))
-		
-		$groups = $null
-		if ($host.Version -gt "7.0")
+		foreach ($rate in $exchangeRates)
 		{
-			$groups = $([xml]$(Invoke-WebRequest -Method Post -SkipHeaderValidation -Headers @{'Content-Type'='application/soap+xml;charset=utf-8;action=urn:getInterestAndExchangeRates'} -Body $body -Uri 'https://swea.riksbank.se/sweaWS/services/SweaWebServiceHttpSoap12Endpoint' -UseBasicParsing)."Content").Envelope.body.getInterestAndExchangeRatesResponse.return.groups
+			$exchangeDate = [datetime]::ParseExact($rate.date, "yyyy-MM-dd", $null)
+			if ($exchangeDate -eq $date)
+			{
+				$rateOnDate = $rate.value
+			}
+
+			if ($exchangeDate -eq $altDate)
+			{
+				$altRateOnDate = $rate.value
+			}
 		}
-		else
-		{
-			$groups = $([xml]$(Invoke-WebRequest -Method Post -Headers @{'Content-Type'='application/soap+xml;charset=utf-8;action=urn:getInterestAndExchangeRates'} -Body $body -Uri 'https://swea.riksbank.se/sweaWS/services/SweaWebServiceHttpSoap12Endpoint' -UseBasicParsing)."Content").Envelope.body.getInterestAndExchangeRatesResponse.return.groups
+
+		if (($null -eq $rateOnDate) -and ($null -eq $altRateOnDate)) { 
+			if ($retryCount -eq 0) { return 0 }
+			$date = $date.AddDays(-1.0)
+			$altDate = $altDate.AddDays(1.0)
+			$retryCount--
 		}
-		# Scan backwards in time for the latest rate, if the response for the current is empty.
-		if ($null -eq $groups) { Write-Host $([string]::Format("No exchange rate for {0}, trying the previous day", $Date.ToString("yyyy-MM-dd"))) }
-		$Date = $Date.AddDays(-1.0)
 	}
-	while ($null -eq $groups)
-	return [double]$groups.series.resultrows.value.'#text'
+	while ($null -eq $rateOnDate -and $null -eq $altRateOnDate)
+
+	if ($null -ne $rateOnDate -and $rateOnDate -gt $altRateOnDate) { return $rateOnDate	}
+	return $altRateOnDate
 }
 
 $cashTransactions = $(get-content -raw -path getCashTransactions.json | ConvertFrom-Json).data.value.cashTransactionActivities
@@ -52,12 +48,35 @@ $totalTaxUSD = 0.0
 $totalDividendSEK = 0
 $totalTaxSEK = 0
 
+[datetime]$firstDate = [datetime]::MinValue.Date
+[datetime]$lastDate = [datetime]::MinValue.Date
+
+foreach ($ct in $cashTransactions)
+{
+	$txDate = [datetime]::ParseExact($ct.transactionDate, "MM/dd/yyyy", $null)
+
+	# set an initial value for the first date
+	if ($firstDate -eq [datetime]::MinValue) { $firstDate = $txDate }
+
+	# find the earliest date
+	if ($txDate -lt $firstDate) { $firstDate = $txDate }
+
+	# find the latest date
+	if ($txDate -gt $lastDate) { $lastDate = $txDate }
+}
+
+$date1 = Get-Date $firstDate -format yyyy-MM-dd
+$date2 = Get-Date $lastDate -format yyyy-MM-dd
+
+# making a single api call for all the dates since the allowed api call count is limited without an api key
+$exchangeRates = Get-SEKUSDPMIAtDate $date1 $date2
+
 foreach ($ct in $cashTransactions)
 {
 	if ($ct.transactionType -eq "$+-DIV")
 	{
 		$txDate = [datetime]::ParseExact($ct.transactionDate, "MM/dd/yyyy", $null)
-		$txRate = Get-SEKUSDPMIAtDate($txDate)
+		$txRate = Get-ExchangeRateOnDate $txDate $exchangeRates
 		
 		$tx = $ct.amount
 		$txSEK = [int][math]::Round($tx * $txRate)
